@@ -1,0 +1,30 @@
+★  Excel多用户共享方案：华创网表-网络版Excel       ●免费下载      ●在线试用   ★
+供参考 ：查找符合条件的行 并复制到新表中
+Sub test()
+  Dim myText$, myRow As Long
+  Dim d As Object, myRng As Range
+  Set d = CreateObject("scripting.dictionary")
+  myText = "音"  '要查找的内容
+  '--------------------------------------------------
+  With ActiveSheet.Cells '查找的范围
+    Set c = .Find(myText, Lookat:=xlPart)
+    If Not c Is Nothing Then
+      firstAddress = c.Address
+      Do
+        myRow = c.Row
+        '--------------------------------------------------
+        If d.exists(myRow) = False Then
+          If myRng Is Nothing Then Set myRng = Rows(myRow) Else Set myRng = Union(myRng, Rows(myRow))
+          d(myRow) = 0
+        End If
+        '--------------------------------------------------
+        Set c = .FindNext(c)
+      Loop While Not c Is Nothing And c.Address <> firstAddress
+    End If
+  End With
+  '--------------------------------------------------
+  If Not myRng Is Nothing Then
+    myRng.Copy Workbooks.Add.Sheets(1).Range("A1")
+  End If
+End Sub
+复制代码
