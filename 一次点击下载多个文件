@@ -1,0 +1,437 @@
+
+http://blog.csdn.net/mengshan1986/article/details/6655300
+
+一次点击下载多个文件
+标签： htmlimagelistfileauthenticationheaderdownload
+2011-08-02 22:29 1853人阅读 评论(0) 收藏 举报
+版权声明：本文为博主原创文章，未经博主允许不得转载。
+
+目录(?)[-]
+     Prepare multipartrelated document
+     Full source code of support functions
+     Samples
+See also for Download multiple files in one http request article
+ 
+HTTP protocol was designed to send one file per one request. Sometimes you will need to send more files - usually when a client selects several files for download and the files have to be delivered to the client. I created ASP sample which will do such task - the sample is located at http://www.motobit.com/help. 
+     The sample uses command line compression (zip/arj) to pack more files to one file and then sends the zip/arj archive to client. Client must have some software to uncompress the data package (unzip, pkunzip, winzip ...).
+
+      Zip/Arj is great for download of files. But there are some tasks which require send more files in one request, for example HTML page with many small images as a preview. 
+     This task is usually completted as one request to HTML page and many (ten or more) requests to external images. Client-server communication for tenth of http request takes additional overhead on server, additional communication time, consumes line bandwith. The situation is even worse if you need authentication for each image preview - you must do tenth of authentication requests against user database, separated for each http request.
+
+     This article shows another way - you can send HTML document and images (or applets, javascripts, iframes, frames and other external tags with SRC=...) as one multipart/related document, in one response to client request, with one authentication against user database. (see more about multipart/related at Google)
+
+     Prepare multipart/related document
+     There are several steps to create and send multipart document from server. This sample is an ASP/VBS code, but you can simply create similar code for another environment.
+
+Content - type 
+I tried to use multipart/related directly in http header, but unforunatelly, it does not work in IE. So I must use anothe content-type - message/rfc822. The outgoing document contains complette multipart/related header and data then.
+	Response.ContentType =	"message/rfc822"
+Boundary of multipart document 
+Boundary is a unique string which separates file fields in multipart document. Encoded document files must not contain the string.
+	Const Boundary = "----=_NextPart_000_0000_01C31FDD.14FE27E0"
+Mime header at the top of document 
+Mime header contains at least MIME-Version and Content-Type headers. The header has two CrLf at the end.
+Function MimeHeader(Boundary)
+	Dim HTML
+	HTML = "MIME-Version: 1.0" & vbCrLf
+	HTML = HTML & "Content-Type: multipart/related;" & vbCrLf
+	HTML = HTML & vbTab & "type=""text/html"";" & vbCrLf
+	HTML = HTML & vbTab & "boundary=""" & Boundary & """" & vbCrLf
+	HTML = HTML & vbCrLf & "This is a multi-part message In MIME format." & vbCrLf
+	MimeHeader = HTML
+End Function 
+File fields 
+     One file field consists from Boundary preceeded by two hypens ("--"). Next are multipart headers (Content-Type, Content-Location at least, you can add Content-Disposition, Content-ID, ...). Content-Location is a parameter for file location - SRC parameter of file, referred by first document. 
+     I'm using base-64 encoding for binary files, but the encoding is not required.
+Sub WriteFilePart(FileName)
+	Dim CT
+	CT = GetContentType(FileName)
+
+	'Write boundary with file multipart header.
+	Response.Write vbCrLf & "--" & Boundary & vbCrLf
+	Response.Write "Content-Type: " & GetContentType(FileName) & "" & vbCrLf
+	Response.Write "Content-Location: " & GetFileName(FileName) & "" & vbCrLf 
+	Response.Write "Content-Disposition: attachment; filename=""" & _
+		GetFileName(FileName) & """" & vbCrLf 
+	Response.Write "Content-ID: " & GetFileName(FileName) & "" & vbCrLf 
+
+	'Write contents of the file
+	If Left(CT, 4) = "text" Then
+		Response.Write vbCrLf
+		Response.BinaryWrite ReadBinaryFile(FileName)
+	Else
+		'Use Base64 For binary files.
+		Response.Write "Content-Transfer-Encoding: base64" & vbCrLf 
+		Response.Write vbCrLf
+		Response.BinaryWrite GetFileAsBase64(FileName)
+	End If
+	Response.Write vbCrLf
+End Sub
+
+     First file in the multipart document should be main (start) HTML file, next fields are other data - images, scripts, etc.
+HTML document 
+     The first file field contains HTML document. The document has standard formatting, including text, references, etc. There is a change in URL interpretting - local URLs (without http://) poinst to multipart document, to multipart fields, with Content-Location header as address. Next is a sample of the HTML - op.gif means multipart field with Content-Location: op.gif, A Href="cl.gif" means reference to cl.gif file field.
+<!DOCTYPE HTML PUBLIC 
+	"-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML>
+ <HEAD>
+  <TITLE>Tips</TITLE>
+
+  <BASEFONT face="Arial, Verdana, Helvetica">
+ </HEAD>
+
+<Body TOPMARGIN=0 BGPROPERTIES=FIXED BGCOLOR=WHITE>
+ <IMG src="op.gif" border=0>
+<br>
+ <A Href="cl.gif"><IMG src="cl.gif" border=0></A>
+
+</BODY>
+</BASEFONT>
+</HTML>
+
+
+     Full source code of support functions.
+     There is an ASP file include _related.asp bellow, containing support functions to send multipart data documents. 
+     The file is using ADODB.Stream to send binary files, Scripting.FileSystemObject to read file properties, WScript.Shell to get content-type of a file and optionally ScriptUtils.ByteArray to do Base64 conversion.
+
+<%
+'_related.asp include - lets you send HTML code
+'  along with images, scripts And other referenced files
+'  In one HTML response
+'  c 2003 Antonin Foller, Motobit Software, http://www.motobit.com
+
+
+'Sends primary file containing links To other files 
+'  As one response To http request.
+'  Primary file - main HTML file 
+'  OtherFiles - array of referenced files going with HTML document
+Sub SendFileWithImages(PrimaryFile, OtherFiles)
+	Dim HTML
+	'Unique multipart boundary string.
+	Const Boundary = "----=_NextPart_000_0000_01C31FDD.14FE27E0"
+	Response.ContentType =	"message/rfc822"
+
+	'mime header For files.
+	Response.Write MimeHeader(PrimaryFile, Boundary)
+
+	'Write primary file
+	WriteFilePart Boundary, PrimaryFile
+
+	'Write other files.
+	Dim FileName
+	For Each FileName In OtherFiles
+		WriteFilePart Boundary, FileName
+	Next
+
+	'Closing boundary
+	Response.Write vbCrLf & "--" & Boundary & "--" 
+End Sub
+
+'Write MIME header And HTML part For primary HTML
+Sub WriteMimeHeaderAndHTMLPart(Boundary, StartHTML)
+	Dim HTML
+	HTML = "MIME-Version: 1.0" & vbCrLf
+	HTML = HTML & "Content-Type: multipart/related;" & vbCrLf
+	HTML = HTML & vbTab & "type=""text/html"";" & vbCrLf
+	HTML = HTML & vbTab & "boundary=""" & Boundary & """" & vbCrLf
+	HTML = HTML & vbCrLf & "This is a multi-part message In MIME format." & vbCrLf
+
+	Response.Write HTML 
+
+	'Write boundary with file multipart header.
+	Response.Write vbCrLf & "--" & Boundary & vbCrLf
+	Response.Write "Content-Type: text/html" & vbCrLf
+	Response.Write "Content-Location: " & BaseLocation & "start.html" & vbCrLf 
+
+	'Write contents of the file. You can use BASE64 encoding For binary files.
+	Response.Write vbCrLf
+	Response.Write StartHTML
+	Response.Write vbCrLf
+End Sub
+
+'write main MIME header of the document.
+Function MimeHeader(PrimaryFile, Boundary)
+	Dim HTML
+	HTML = "MIME-Version: 1.0" & vbCrLf
+	HTML = HTML & "Content-Type: multipart/related;" & vbCrLf
+'	HTML = HTML & vbTab & "type=""text/html"";" & vbCrLf
+	HTML = HTML & vbTab & "type=""" & GetContentType(PrimaryFile) & """;" & vbCrLf
+'	HTML = HTML & vbTab & "start=""" & GetFileName(PrimaryFile) & """" & vbCrLf
+	HTML = HTML & vbTab & "boundary=""" & Boundary & """" & vbCrLf
+	HTML = HTML & vbCrLf & "This is a multi-part message In MIME format." & vbCrLf
+	MimeHeader = HTML
+End Function 
+
+'Write one mp header with contents.
+Sub WriteFilePart(Boundary, FileName)
+	Dim CT
+	CT = GetContentType(FileName)
+
+	'Write boundary with file multipart header.
+	Response.Write vbCrLf & "--" & Boundary & vbCrLf
+	Response.Write "Content-Type: " & GetContentType(FileName) & "" & vbCrLf
+	Response.Write "Content-Location: " & BaseLocation & _
+	  GetFileName(FileName) & "" & vbCrLf 
+'	Response.Write "Content-Disposition: attachment; filename=""" & _
+    GetFileName(FileName) & """" & vbCrLf 
+'	Response.Write "Content-ID: " & GetFileName(FileName) & "" & vbCrLf 
+
+	'Write contents of the file. You can use BASE64 encoding For binary files.
+	If Left(CT, 4) = "text" Then
+		Response.Write vbCrLf
+		Response.BinaryWrite ReadBinaryFile(FileName)
+	Else
+		'Use Base64 For binary files.
+		Response.Write vbCrLf
+'		Response.Write "Content-Transfer-Encoding: base64" & vbCrLf 
+		Response.BinaryWrite ReadBinaryFile(FileName)
+'		Response.BinaryWrite GetFileAsBase64(FileName)
+	End If
+	Response.Write vbCrLf
+End Sub
+
+
+
+
+
+'Support functions - read files, separate names, etc.
+Dim BA
+Function GetFileAsBase64(FileName)
+	If isempty(BA) Then Set BA = CreateObject("ScriptUtils.ByteArray")
+	BA.ReadFrom FileName
+	GetFileAsBase64 = BA.Base64
+End Function
+
+Function GetFileExtension(FileName)
+	Dim Pos
+	Pos = instrrev(FileName, ".")
+	If Pos>0 Then GetFileExtension = Mid(FileName, Pos+1)
+End Function
+
+Function GetContentType(FileName)
+	GetContentType = GetContentTypeByExt(GetFileExtension(FileName))
+End Function 
+
+Dim Shell
+'This Function reads content type from windows registry
+Function GetContentTypeByExt(Extension)
+	Dim CT
+	If isempty(Shell) Then Set Shell = CreateObject("WScript.Shell")
+	on error resume Next
+	CT = Shell.regRead("HKCR\." & Extension & "\Content Type")
+	If Len(CT) = 0 Then CT = "application/x-msdownload"
+	GetContentTypeByExt = CT
+End Function 
+
+Function SplitFileName(FileName)
+  SplitFileName = InStrRev(FileName, "\")
+End Function
+
+Function GetFileName(fullPath)
+  GetFileName = Mid(fullPath, SplitFileName(fullPath) + 1)
+End Function
+
+
+Function ReadBinaryFile(FileName)
+  Const adTypeBinary = 1
+  
+  'Create Stream object
+  Dim BinaryStream
+  Set BinaryStream = CreateObject("ADODB.Stream")
+  
+  'Specify stream type - we want To get binary data.
+  BinaryStream.Type = adTypeBinary
+  
+  'Open the stream
+  BinaryStream.Open
+  
+  'Load the file data from disk To stream object
+  BinaryStream.LoadFromFile FileName
+  
+  'Open the stream And get binary data from the object
+  ReadBinaryFile = BinaryStream.Read
+End Function
+
+Function GetFileSize(FileName)
+  On Error Resume Next
+  Dim FS: Set FS = CreateObject("Scripting.FileSystemObject")
+  GetFileSize = FS.GetFile(FileName).Size
+  If err<>0 Then GetFileSize = -1 
+End Function
+%>
+     Samples.
+     First sample sends an HTML formatted file (img/primary.htm) along with two images. The files are located in img/ relative folder.
+
+<%option explicit%><!--#INCLUDE FILE="_related.asp"-->
+<%
+'URL of folder containing base HTML file And included files
+Const BaseLocation = ""
+
+SendFileWithImages Server.MapPath("img/primary.htm"), _
+  array(Server.MapPath("img/op.gif"), Server.MapPath("img/cl.gif"))
+
+%>
+     Next sample is a complette list of images in one folder. The images are send as a preview in one response stream to a client.
+
+<%option explicit%><!--#INCLUDE FILE="_related.asp"-->
+<%
+
+'URL of folder containing base HTML file And included files
+Const BaseLocation = ""
+
+SendFolderImagePreview "D:\apl\Cool2000\Quick Start\images" 
+
+'Creates one HTML page with all images In the folder.
+'  Then sends the HTML along with images In one response.
+Sub SendFolderImagePreview(Folder)
+  'Create HTML data with image references.
+  Dim HTML
+  HTML = "<!DOCTYPE HTML Public ""-//W3C//DTD HTML 4.0 Transitional//EN"">"
+  HTML = HTML & "<HTML><HEAD><TITLE>Folder " & _
+    Folder & " contents.</TITLE></HEAD>"
+  HTML = HTML & "<Body>" & vbCrLf
+
+  Const imageExts = ".gif,.jpg,.png,.jpeg,.bmp,.ico"
+  Dim FS: Set FS = CreateObject("Scripting.FileSystemObject")
+  Dim File, ImageList
+
+  'Create folder image list
+  For Each File In FS.GetFolder(Folder).Files
+    'Check file To extension
+    If InStr(1, imageExts, GetFileExtension(File) & ",", 1)>0 Then
+      'Reference To image
+      HTML = HTML & "<Img Src=" & File.Name & _
+        " Width=100 height=100>" & vbCrLf
+
+      'Array of files To send along with HTML
+      ImageList = ImageList & "*" & File.Path
+    End If
+  Next
+  ImageList = Mid(ImageList, 2)
+  HTML = HTML & "</Body>"
+  HTML = HTML & "</HTML>" & vbCrLf
+
+  'Unique multipart boundary string.
+  Const Boundary = "----=_NextPart_000_0000_01C31FDD.14FE27E0"
+  Response.ContentType =  "message/rfc822"
+
+  'mime header For files.
+  WriteMimeHeaderAndHTMLPart Boundary, HTML
+
+  'Write image files.
+  Dim FileName
+  For Each FileName In split(ImageList, "*")
+    WriteFilePart Boundary, FileName
+  Next
+
+  'Closing boundary
+  Response.Write vbCrLf & "--" & Boundary & "--" 
+End Sub
+%>
+ 
+ 
+See also for 'Download multiple files in one http request' article:
+     Work with binary files in VBSscript - read and write local and remote files Reading and writting binary and text files is a first task you will need to solve in server-side ASP. This article contains several VBS functions which let's you store data to local disk and read local or remote (http) files.
+     Automatic file upload using IE+ADO without user interaction - VBSscript Lets you upload file from a client to www server over http connection using vbs, IE and ADODB. The file is sent as a result of type=file form field encoded multipart/form-data.
+
+If you like this page, please include next link on your pages:
+<A
+ Href="http://www.motobit.com/tips/detpg_multiple-files-one-request/"
+ Title="This article shows a way to
+  download multiple files in one
+  http request. It let's you
+  send an HTML page along
+  with image preview, prepare more
+  files for download and send
+  the files as one data
+  stream. One request, one authentication
+  per multiple files."
+>Download multiple  files in one http request</A
+顶
+0
+踩
+0
+ 
+ 
+上一篇unicode 转码工具可以实现类似jdk中的anscii的功能（JavaScript）
+  相关文章推荐
+• JAVA 如何一次下载多个文件
+• 大数据技术实战线上峰会--董西成
+• Web页面中调用迅雷进行单文件和批量下载
+• 30天系统掌握机器学习--唐宇迪
+• js 实现多文件下载
+• ORACLE数据库学习资料集锦
+• 一次点击下载多个文件
+• PHP从零开始实战篇
+• C#之WinForm基础 运行多个窗体时，点击按钮，一次关闭所有窗体
+• 玩转微信小程序第一篇
+• 日本GG广告源码下载~ GG专用 点击一次1美元
+• 深度学习案例分享—人脸检测
+• 运行程序所需文件多个关键字请用空格分隔，最多填写5个。点击右侧Tag快速添加
+• C#将多个ppt文件转为预览图片，并在程序中直接打开所点击的ppt。
+• uploadify支持一次选择多个文件且批量上传
+• 一次选择多个文件实现上传功能
+
+查看评论
+
+  暂无评论
+
+您还没有登录,请[登录]或[注册]
+* 以上用户言论只代表其个人观点，不代表CSDN网站的观点或立场
+个人资料
+ 访问我的空间 
+mengshan1986
+ 
+访问：25898次
+积分：387
+等级： 
+排名：千里之外
+原创：12篇转载：4篇译文：0篇评论：4条
+文章搜索
+
+搜索
+文章存档
+2011年08月(1)
+2009年04月(2)
+2009年02月(1)
+2008年12月(1)
+2008年11月(1)
+展开
+阅读排行
+js判断浏览器类型(5953)
+php实现rss订阅功能(3417)
+The specified CGI application misbehaved by not returning a complete set of HTTP headers错误解决办法(2104)
+windows安装时出现Setup is inspecting your computer's hardware configuration后黑屏的解决方法(1904)
+一次点击下载多个文件(1850)
+js的submit()方法详解(1032)
+php在文件中写入回车问题,如何建立文本文件写入回车,记事本能看到(1020)
+php隐藏真实下载地址(646)
+unicode 转码工具可以实现类似jdk中的anscii的功能（JavaScript）(630)
+火狐与ie在本页跳转的方法，windw.location(561)
+评论排行
+php实现rss订阅功能(3)
+js判断浏览器类型(1)
+ie6、ie7实现图片预览功能(0)
+js的submit()方法详解(0)
+The specified CGI application misbehaved by not returning a complete set of HTTP headers错误解决办法(0)
+一次点击下载多个文件(0)
+php分页代码(0)
+我找到的php上传代码(0)
+微软的ie和sun的jdk冲突，网页一片空白(0)
+windows安装时出现Setup is inspecting your computer's hardware configuration后黑屏的解决方法(0)
+推荐文章
+* CSDN日报20170828——《4个方法快速打造你的阅读清单》
+* Android检查更新下载安装
+* 动手打造史上最简单的 Recycleview 侧滑菜单
+* TCP网络通讯如何解决分包粘包问题
+* SDCC 2017之区块链技术实战线上峰会
+* 快速集成一个视频直播功能
+最新评论
+js判断浏览器类型
+liuyuanhui0301:
+php实现rss订阅功能
+SunRock800: 这么容易啊
+php实现rss订阅功能
+lantianxin520520:
+php实现rss订阅功能
+daliao2008:
