@@ -1,0 +1,26 @@
+Public Sub 合并()
+
+Dim Rng As Range
+Dim Arr
+Dim LastR As Long
+Dim Wb As Workbook
+Dim MyFile As String
+Dim MyPath As String
+
+Application.ScreenUpdating = False
+MyPath = ThisWorkbook.Path & "\"
+
+MyFile = Dir(MyPath & "*.csv")
+
+Do Until MyFile = ""
+Set Wb = Workbooks.Open(MyPath & MyFile)
+Set Rng = Range("A1").CurrentRegion
+Set Rng = Rng.Offset(4).Resize(Rng.Rows.Count - 4)
+Arr = Rng
+Wb.Close False
+LastR = Range("A60000").End(xlUp).Row + 1
+Cells(LastR, 1).Resize(UBound(Arr), UBound(Arr, 2)) = Arr
+MyFile = Dir
+Loop
+Application.ScreenUpdating = True
+End Sub
