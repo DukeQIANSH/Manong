@@ -1,0 +1,31 @@
+Sub import_txt()
+On Error Resume Next
+Dim my_Link, my_Doc As String
+With Application.FileDialog(msoFileDialogFolderPicker)
+.Show
+.AllowMultiSelect = False
+my_Link = .SelectedItems(1)
+End With
+ 
+Dim doc_Count As Single
+doc_Count = 0
+my_Doc = Dir(my_Link & "\" & "*.txt")
+ 
+Do While Len(my_Doc) <> 0
+Worksheets.Add
+ActiveSheet.Name = my_Doc
+Dim my_Word As String
+Dim i As Single
+i = 1
+Open my_Link & "\" & my_Doc For Input As #1
+Do While Not EOF(1)
+Line Input #1, my_Word
+Cells(i, 1) = my_Word
+i = i + 1
+Loop
+Close
+doc_Count = doc_Count + 1
+my_Doc = Dir
+Loop
+MsgBox "共导入" & doc_Count & "个文件"
+End Sub
