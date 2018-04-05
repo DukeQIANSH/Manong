@@ -1,0 +1,71 @@
+import requests
+from bs4 import BeautifulSoup
+import bs4
+from datetime import datetime
+
+
+headers = {'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:23.0) Gecko/20100101 Firefox/23.0'}
+
+def getNewsDetail(newsurl):
+    result={}
+    res = requests.get(newsurl,headers=headers)
+    res.encoding= 'utf-8'
+    soup = BeautifulSoup(res.text,'html.parser')
+    result['title']=soup.select('title')[0].text
+    result['href']=newsurl
+    result['uid']=newsurl.lstrip('http://www.cbrc.gov.cn/chinese/home/docView/').rstrip('.html')
+    #result['newssource']=soup.select('div')
+    #timesource = soup.select(".date")[0].text.strip().replace(" ","")
+    #dt = datetime.strptime(timesource, '%Y年%m月%d日%H:%M')
+    #result['dt']=dt.strftime('%Y-%m-%d')
+    result['body']='@'.join([p.text.strip()for p in soup.select('p')])
+    #result['editor']=soup.select('.show_author')[0].text.strip("责任编辑：")
+    #result['comments']=getCommentCounts(newsurl)
+    return result
+
+
+def parseListLinks(url):
+    newsdetails=[]
+    res=requests.get(url,headers=headers)
+    res.encoding='utf-8'
+    soup = BeautifulSoup(res.text,'html.parser')
+    for ent in soup.select('li'):
+        if len(ent.select('a'))>0:
+            newsdetails.append(getNewsDetail('http://www.cbrc.gov.cn'+ent.select('a')[0]['href']))
+    return newsdetails
+
+
+
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+
+url='http://www.cbrc.gov.cn/search/search.jsp?page={}&searchword=%E7%9B%91%E7%BD%9A&agencyShortlink='
+
+news_total=[]
+
+for i in range(1,2):
+    newsurl=url.format(i)
+    newsary=parseListLinks(newsurl)
+    news_total.extend(newsary)
+
+
+
+
+
+
+import pandas
+df=pandas.DataFrame(news_total)
+df
+
+
+
+df.to_excel('cbrc_fine20180403-2.xlsx')
+
+
+
+
+import sqlite3
+with sqlite3.connect('cbrc_fine.sqlite') as db:
+    df.to_sql('cbrc_fine20180403-1',con=db)
+
